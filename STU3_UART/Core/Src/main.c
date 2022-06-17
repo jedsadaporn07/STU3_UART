@@ -77,6 +77,41 @@ uint8_t chksum2;
 uint8_t chksum3;
 uint8_t countN = 0;
 uint8_t DataNew;
+uint8_t rxlen;
+
+///////////////////// DMA//////////////////////////////
+typedef struct _UartStructure
+{
+	UART_HandleTypeDef *huart;
+	uint16_t TxLen, RxLen;
+	uint8_t *TxBuffer;
+	uint16_t TxTail, TxHead;
+	uint8_t *RxBuffer;
+	uint16_t RxTail; //RXHeadUseDMA
+
+} UARTStucrture;
+
+UARTStucrture UART2 =
+{ 0 };
+
+uint8_t MainMemory[255] =
+{ 0 };
+
+typedef enum
+{
+	DNMXP_idle,
+	DNMXP_1stHeader,
+	DNMXP_2ndHeader,
+	DNMXP_3rdHeader,
+	DNMXP_Reserved,
+	DNMXP_ID,
+	DNMXP_LEN1,
+	DNMXP_LEN2,
+	DNMXP_Inst,
+	DNMXP_ParameterCollect,
+	DNMXP_CRCAndExecute
+
+} DNMXPState;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -85,8 +120,26 @@ static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
 static void MX_USART2_UART_Init(void);
 /* USER CODE BEGIN PFP */
-void All_mode();
+void All_mode(uint8_t *Memory, uint8_t MotorID, int16_t dataIn, UARTStucrture *uart);
 void UARTRecieveIT();
+
+
+//////////////////////////////////DMA//////////////////////////////////
+void UARTInit(UARTStucrture *uart);
+
+void UARTResetStart(UARTStucrture *uart);
+
+uint32_t UARTGetRxHead(UARTStucrture *uart);
+
+int16_t UARTReadChar(UARTStucrture *uart);
+
+void UARTTxDumpBuffer(UARTStucrture *uart);
+
+void UARTTxWrite(UARTStucrture *uart, uint8_t *pData, uint16_t len);
+
+unsigned short update_crc(unsigned short crc_accum, unsigned char *data_blk_ptr,
+		unsigned short data_blk_size);
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -125,20 +178,38 @@ int main(void)
   MX_DMA_Init();
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
-  {
-	  //HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 9 ,1000);
+  UART2.huart = &huart2;
+  UART2.RxLen = 255;
+  UART2.TxLen = 255;
+  UARTInit(&UART2);
+  UARTResetStart(&UART2);
+  HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 9 ,1000);
 	  //HAL_UART_Transmit(&huart2, (uint8_t*)temp_f, 9 ,1000);
-  }
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+	  int16_t inputChar = UARTReadChar(&UART2);
+	  		//if input char == -1 ==> No New data
+	  		if (inputChar != -1)
+	  		{
+#ifdef UARTDEBUG
+	  		char temp[32];
+	  		sprintf(temp, "Recived [%d]\r\n", inputChar);
+	  		//UARTTxWrite(&UART2, (uint8_t*) temp, strlen(temp));
+#else
+	  		//DynamixelProtocal2(MainMemory, 1, inputChar, &UART2);
+	  		//dataFN += 1;
+	  		All_mode(MainMemory, 1, inputChar, &UART2);
+#endif
+
+	  		}
 	  /*Method 2 Interrupt Mode*/
 	  //HAL_UART_Receive_IT(&huart2,  (uint8_t*)RxDataBuffer, 32);
 	  /*Method 2 W/ 1 Char Received*/
-	  UARTRecieveIT();
+	  //UARTRecieveIT();
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -276,8 +347,44 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-void All_mode()
+void UARTInit(UARTStucrture *uart)
 {
+	//dynamic memory allocate
+	uart->RxBuffer = (uint8_t*) calloc(sizeof(uint8_t), UART2.RxLen);
+	uart->TxBuffer = (uint8_t*) calloc(sizeof(uint8_t), UART2.TxLen);
+	uart->RxTail = 0;
+	uart->TxTail = 0;
+	uart->TxHead = 0;
+
+}
+
+void UARTResetStart(UARTStucrture *uart)
+{
+	HAL_UART_Receive_DMA(uart->huart, uart->RxBuffer, uart->RxLen);
+}
+uint32_t UARTGetRxHead(UARTStucrture *uart)
+{
+	return uart->RxLen - __HAL_DMA_GET_COUNTER(uart->huart->hdmarx);
+}
+int16_t UARTReadChar(UARTStucrture *uart)
+{
+	int16_t Result = -1; // -1 Mean no new data
+
+	//check Buffer Position
+	if (uart->RxTail != UARTGetRxHead(uart))
+	{
+		//get data from buffer
+		Result = uart->RxBuffer[uart->RxTail];
+		uart->RxTail = (uart->RxTail + 1) % uart->RxLen;
+
+	}
+	return Result;
+
+}
+void All_mode(uint8_t *Memory, uint8_t MotorID, int16_t DataIn, UARTStucrture *uart)
+{
+	N_state = uart->RxBuffer[uart->RxTail-1];
+	//rxlen = uart->RxLen;
 	switch (chkM){
 		case 0:
 			StartM = DataIn;
@@ -309,7 +416,8 @@ void All_mode()
 					chksum2 = ~(StartM + dataF1 + dataF2);
 					if (chksum == chksum2){
 						M_state = 1;
-						HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
+						HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2, 1000);
+						//HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
 						chkM = 0;
 						dataFN = 0;
 					}
@@ -319,8 +427,8 @@ void All_mode()
 					chksum1 = ~(StartM);
 					if (chksum == chksum1){
 						M_state = 2;
-						//HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2, 1000);
-						HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
+						HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2, 1000);
+						//HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
 						chkM = 0;
 						dataFN = 0;
 					}
@@ -331,8 +439,8 @@ void All_mode()
 					chksum1 = ~(StartM);
 					if (chksum == chksum1){
 						M_state = 3;
-						//HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2, 1000);
-						HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
+						HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2, 1000);
+						//HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
 						chkM = 0;
 						dataFN = 0;
 					}
@@ -454,7 +562,8 @@ void All_mode()
 					chksum1 = ~(StartM);
 					if (chksum == chksum1){
 						M_state = 12;
-						HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
+						HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2, 1000);
+						//HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
 						chkM = 0;
 						dataFN = 0;
 					}
@@ -464,7 +573,8 @@ void All_mode()
 					chksum1 = ~(StartM);
 					if (chksum == chksum1){
 						M_state = 13;
-						HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
+						HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2, 1000);
+						//HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
 						chkM = 0;
 						dataFN = 0;
 					}
@@ -485,27 +595,27 @@ void All_mode()
 }
 void UARTRecieveIT()
 {
-	static uint32_t dataPos =0;
-	int16_t data=-1;
+//	static uint32_t dataPos =0;
+//	int16_t data=-1;
 	//HAL_UART_Receive_DMA(&huart2,RxDataBuffer,32);
-	HAL_UART_Receive_IT(&huart2,  (uint8_t*)RxDataBuffer, 32);
-	if(huart2.RxXferSize - huart2.RxXferCount!=dataPos)
-	{
-		data=RxDataBuffer[dataPos];
-		DataIn = data;
-		dataPos= (dataPos+1)%huart2.RxXferSize;
-		Posdata = dataPos;
-		dataFN += 1;
-
-	}
+	//HAL_UART_Receive_IT(&huart2,  (uint8_t*)RxDataBuffer, 32);
+//	if(huart2.RxXferSize - huart2.RxXferCount!=dataPos)
+//	{
+//		data=RxDataBuffer[dataPos];
+//		DataIn = data;
+//		dataPos= (dataPos+1)%huart2.RxXferSize;
+//		Posdata = dataPos;
+//		dataFN += 1;
+//
+//	}
 //	HAL_UART_Receive_DMA(&huart2, (uint8_t*)RxDataBuffer, 32);
 //	if (dataPos == 32){
 //		dataPos = 0;
 //	}
 //	DataIn=RxDataBuffer[dataPos];
 //	dataPos += 1;
-
-	All_mode();
+//	N_state = R
+//	All_mode();
 }
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
