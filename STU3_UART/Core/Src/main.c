@@ -22,7 +22,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
-#include <string.h>
+#include "string.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -45,67 +45,24 @@ DMA_HandleTypeDef hdma_usart2_rx;
 DMA_HandleTypeDef hdma_usart2_tx;
 
 /* USER CODE BEGIN PV */
-char TxDataBuffer[32] =
-{ 0 };
-//uint16_t
-uint8_t RxDataBuffer[32] =
-{ 0 };
 uint8_t temp_s[2]="Xu";
 uint8_t temp_f[2]="Fn";
-uint8_t Posdata;
-int DataIn;
-uint8_t M_state = 0;
-uint8_t N_state = 0;
+uint16_t datasize = 0;
 uint8_t chkStart;
 uint8_t chkStart2;
 uint8_t NameM;
 uint8_t StartM;
 uint8_t chkM = 0;
-uint8_t dataFN = 0;
-uint8_t Nstation;
-uint8_t dataF1;
-uint8_t dataF2;
-uint8_t dataFSum;
 uint8_t chksum;
 uint8_t chksum1;
 uint8_t chksum2;
 uint8_t chksum3;
-uint8_t countN = 0;
-
-
-///////////////////// DMA//////////////////////////////
-typedef struct _UartStructure
-{
-	UART_HandleTypeDef *huart;
-	uint16_t TxLen, RxLen;
-	uint8_t *TxBuffer;
-	uint16_t TxTail, TxHead;
-	uint8_t *RxBuffer;
-	uint16_t RxTail; //RXHeadUseDMA
-
-} UARTStucrture;
-
-UARTStucrture UART2 =
-{ 0 };
-
-uint8_t MainMemory[255] =
-{ 0 };
-
-typedef enum
-{
-	DNMXP_idle,
-	DNMXP_1stHeader,
-	DNMXP_2ndHeader,
-	DNMXP_3rdHeader,
-	DNMXP_Reserved,
-	DNMXP_ID,
-	DNMXP_LEN1,
-	DNMXP_LEN2,
-	DNMXP_Inst,
-	DNMXP_ParameterCollect,
-	DNMXP_CRCAndExecute
-
-} DNMXPState;
+uint8_t dataF1;
+uint8_t dataF2;
+uint8_t M_state;
+uint8_t Posdata;
+uint8_t Nstation;
+uint8_t dataFSum;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -114,31 +71,212 @@ static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
 static void MX_USART2_UART_Init(void);
 /* USER CODE BEGIN PFP */
-void All_mode(uint8_t DataIn, UARTStucrture *uart);
-void UARTRecieveIT();
-
-
-//////////////////////////////////DMA//////////////////////////////////
-void UARTInit(UARTStucrture *uart);
-
-void UARTResetStart(UARTStucrture *uart);
-
-uint32_t UARTGetRxHead(UARTStucrture *uart);
-
-int16_t UARTReadChar(UARTStucrture *uart);
-
-void UARTTxDumpBuffer(UARTStucrture *uart);
-
-void UARTTxWrite(UARTStucrture *uart, uint8_t *pData, uint16_t len);
-
-unsigned short update_crc(unsigned short crc_accum, unsigned char *data_blk_ptr,
-		unsigned short data_blk_size);
-
+void All_mode();
+void check_Mode();
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
+#define RxBuf_SIZE   32
+#define MainBuf_SIZE 32
+
+uint8_t RxBuf[RxBuf_SIZE];
+uint8_t MainBuf[MainBuf_SIZE];
+
+uint16_t oldPos = 0;
+uint16_t newPos = 0;
+
+void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
+{
+	if (huart->Instance == USART2)
+	{
+		oldPos = newPos;  // Update the last position before copying new data
+		datasize = Size;
+		/* If the data in large and it is about to exceed the buffer size, we have to route it to the start of the buffer
+		 * This is to maintain the circular buffer
+		 * The old data in the main buffer will be overlapped
+		 */
+		if (oldPos+Size > MainBuf_SIZE)  // If the current position + new data size is greater than the main buffer
+		{
+			uint16_t datatocopy = MainBuf_SIZE-oldPos;  // find out how much space is left in the main buffer
+			memcpy ((uint8_t *)MainBuf+oldPos, RxBuf, datatocopy);  // copy data in that remaining space
+
+			oldPos = 0;  // point to the start of the buffer
+			memcpy ((uint8_t *)MainBuf, (uint8_t *)RxBuf+datatocopy, (Size-datatocopy));  // copy the remaining data
+			newPos = (Size-datatocopy);  // update the position
+		}
+
+		/* if the current position + new data size is less than the main buffer
+		 * we will simply copy the data into the buffer and update the position
+		 */
+		else
+		{
+			memcpy ((uint8_t *)MainBuf+oldPos, RxBuf, Size);
+			newPos = Size+oldPos;
+		}
+		StartM = MainBuf[newPos-datasize];
+		chkStart = StartM >> 4;
+		NameM = (StartM & 15);
+		if (chkStart == 9){
+			if (NameM >= 1 && NameM <= 14){
+				check_Mode();
+			}
+		}
+
+
+		/* start the DMA again */
+		HAL_UARTEx_ReceiveToIdle_DMA(&huart2, (uint8_t *) RxBuf, RxBuf_SIZE);
+		__HAL_DMA_DISABLE_IT(&hdma_usart2_rx, DMA_IT_HT);
+
+	}
+}
+void check_Mode()
+{
+		switch (NameM){
+			case 1: //10010001 01000000 00000000 00101110
+				chksum = MainBuf[newPos-1];
+				dataF2 = MainBuf[newPos-2];
+				dataF1 = MainBuf[newPos-3];
+				chksum2 = ~(StartM + dataF1 + dataF2);
+				if (chksum == chksum2){
+					M_state = 1;
+					//HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
+					HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2 ,1000); //Xu
+				}
+				break;
+			case 2: //10010010 01101101
+				chksum = MainBuf[newPos-1];
+				chksum1 = ~(StartM);
+				if (chksum == chksum1){
+					M_state = 2;
+					//HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
+					HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2 ,1000); //Xu
+				}
+				break;
+			case 3: //10010011 01101100
+					chksum = MainBuf[newPos-1];
+					chksum1 = ~(StartM);
+				if (chksum == chksum1){
+					M_state = 3;
+					//HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
+					HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2 ,1000); //Xu
+				}
+				break;
+			case 4:
+					chksum = MainBuf[newPos-1];
+					dataF2 = MainBuf[newPos-2];
+					dataF1 = MainBuf[newPos-3];
+					chksum2 = ~(StartM + dataF1 + dataF2);
+				if (chksum == chksum2){
+					M_state = 4;
+					//HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
+					HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2 ,1000); //Xu
+				}
+				break;
+			case 5:
+					chksum = MainBuf[newPos-1];
+					dataF2 = MainBuf[newPos-2];
+					dataF1 = MainBuf[newPos-3];
+					chksum2 = ~(StartM + dataF1 + dataF2);
+				if (chksum == chksum2){
+					M_state = 5;
+					//HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
+					HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2 ,1000); //Xu
+				}
+				break;
+			case 6:
+					chksum = MainBuf[newPos-1];
+					dataF2 = MainBuf[newPos-2];
+					dataF1 = MainBuf[newPos-3];
+					chksum2 = ~(StartM + dataF1 + dataF2);
+				if (chksum == chksum2){
+					M_state = 6;
+					//HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
+					HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2 ,1000); //Xu
+				}
+				break;
+			case 7:
+				Nstation = MainBuf[(newPos-datasize)+1];
+				for(int i=2; i < Nstation+2; i++ ){
+					dataFSum += MainBuf[newPos-i];
+				}
+				chksum = MainBuf[newPos-1];
+				chksum3 = ~(StartM + Nstation + dataFSum);
+				if (chksum == chksum3){
+					M_state = 7;
+					//HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
+					dataFSum = 0;
+					HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2 ,1000); //Xu
+				}
+				break;
+			case 8: //10011000 01100111
+				chksum = MainBuf[newPos-1];
+				chksum1 = ~(StartM);
+				if (chksum == chksum1){
+					M_state = 8;
+					//HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
+					HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2 ,1000); //Xu
+					HAL_UART_Transmit(&huart2, (uint8_t*)temp_f, 2 ,1000);
+				}
+				break;
+			case 9: //10011001 01100110
+				chksum = MainBuf[newPos-1];
+				chksum1 = ~(StartM);
+				if (chksum == chksum1){
+					M_state = 9;
+					//HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
+					HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2 ,1000);
+				}
+				break;
+			case 10: //10011010 01100101
+				chksum = MainBuf[newPos-1];
+				chksum1 = ~(StartM);
+				if (chksum == chksum1){
+					M_state = 10;
+					//HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
+					HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2 ,1000);
+				}
+				break;
+			case 11: //10011011 01100100
+				chksum = MainBuf[newPos-1];
+				chksum1 = ~(StartM);
+				if (chksum == chksum1){
+					M_state = 11;
+					//HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
+					HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2 ,1000);
+				}
+				break;
+			case 12: //10011100 01100011
+				chksum = MainBuf[newPos-1];
+				chksum1 = ~(StartM);
+				if (chksum == chksum1){
+					M_state = 12;
+					//HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
+					HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2 ,1000); //Xu
+				}
+				break;
+			case 13: //10011101 01100010
+				chksum = MainBuf[newPos-1];
+				chksum1 = ~(StartM);
+				if (chksum == chksum1){
+					M_state = 13;
+					//HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
+					HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2 ,1000); //Xu
+				}
+				break;
+			case 14: //10011110 01100001
+				chksum = MainBuf[newPos-1];
+				chksum1 = ~(StartM);
+				if (chksum == chksum1){
+					M_state = 14;
+					//HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
+					HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2 ,1000); //Xu
+				}
+				break;
+			}
+
+}
 /* USER CODE END 0 */
 
 /**
@@ -172,30 +310,15 @@ int main(void)
   MX_DMA_Init();
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
-  UART2.huart = &huart2;
-  UART2.RxLen = 255;
-  UART2.TxLen = 255;
-  UARTInit(&UART2);
-  UARTResetStart(&UART2);
-  UARTReadChar(&UART2);
-  //HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 9 ,1000);
-  //HAL_UART_Transmit(&huart2, (uint8_t*)temp_f, 9 ,1000);
+  HAL_UARTEx_ReceiveToIdle_DMA(&huart2, RxBuf, RxBuf_SIZE);
+  __HAL_DMA_DISABLE_IT(&hdma_usart2_rx, DMA_IT_HT);
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  int16_t inputChar = UARTReadChar(&UART2);
-	  		//if input char == -1 ==> No New data
-	  		if (inputChar != -1)
-	  		{
-	  			dataFN += 1;
-	  			for(int i = 0; i < dataFN; i++){
-	  				All_mode(inputChar, &UART2);
-	  			}
 
-	  		}
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -332,281 +455,6 @@ static void MX_GPIO_Init(void)
 
 }
 
-/* USER CODE BEGIN 4 */
-void UARTInit(UARTStucrture *uart)
-{
-	//dynamic memory allocate
-	uart->RxBuffer = (uint8_t*) calloc(sizeof(uint8_t), UART2.RxLen);
-	uart->TxBuffer = (uint8_t*) calloc(sizeof(uint8_t), UART2.TxLen);
-	uart->RxTail = 0;
-	uart->TxTail = 0;
-	uart->TxHead = 0;
-
-}
-
-void UARTResetStart(UARTStucrture *uart)
-{
-	HAL_UART_Receive_DMA(uart->huart, uart->RxBuffer, uart->RxLen);
-}
-uint32_t UARTGetRxHead(UARTStucrture *uart)
-{
-	return uart->RxLen - __HAL_DMA_GET_COUNTER(uart->huart->hdmarx);
-}
-int16_t UARTReadChar(UARTStucrture *uart)
-{
-	int16_t Result = -1; // -1 Mean no new data
-
-	//check Buffer Position
-	if (uart->RxTail != UARTGetRxHead(uart))
-	{
-		//get data from buffer
-		Result = uart->RxBuffer[uart->RxTail];
-		uart->RxTail = (uart->RxTail + 1) % uart->RxLen;
-	}
-
-	return Result;
-
-}
-void All_mode(uint8_t DataIn, UARTStucrture *uart)
-{
-	N_state = uart->RxBuffer[uart->RxTail-1];
-	switch (chkM){
-		case 0:
-			StartM = DataIn;
-			chkStart = StartM >> 4;
-			if (chkStart == 9){
-				chkM = 1;
-			}else{
-				chkM = 0;
-			}
-			break;
-		case 1:
-			NameM = (StartM & 15);
-			if (NameM >= 1 && NameM <= 14){
-				chkM = 2;
-			}else{
-				chkM = 0;
-			}
-			break;
-		case 2:
-			switch (NameM){
-				case 1: //10010001 01000000 00000000 00101110
-					if (dataFN == 2){
-						dataF1 = DataIn;
-					}
-					if(dataFN == 3){
-						dataF2 = DataIn;
-					}
-					chksum = DataIn;
-					chksum2 = ~(StartM + dataF1 + dataF2);
-					if (chksum == chksum2){
-						M_state = 1;
-						HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
-						//HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2 ,1000); //Xu
-						chkM = 0;
-						dataFN = 0;
-					}
-					break;
-				case 2: //10010010 01101101
-					chksum = DataIn;
-					chksum1 = ~(StartM);
-					if (chksum == chksum1){
-						M_state = 2;
-						HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
-						//HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2 ,1000); //Xu
-						chkM = 0;
-						dataFN = 0;
-					}
-					break;
-				case 3: // 10010011 01101100
-					chksum = DataIn;
-					chksum1 = ~(StartM);
-					if (chksum == chksum1){
-						M_state = 3;
-						HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
-						//HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2 ,1000); //Xu
-						chkM = 0;
-						dataFN = 0;
-					}
-					break;
-				case 4:
-					if (dataFN == 2){
-						dataF1 = DataIn;
-					}
-					if(dataFN == 3){
-						dataF2 = DataIn;
-					}
-					chksum = DataIn;
-					chksum2 = ~(StartM + dataF1 + dataF2);
-					if (chksum == chksum2){
-						M_state = 4;
-						HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
-						chkM = 0;
-						dataFN = 0;
-					}
-					break;
-				case 5:
-					if (dataFN == 2){
-						dataF1 = DataIn;
-					}
-					if(dataFN == 3){
-						dataF2 = DataIn;
-					}
-					chksum = DataIn;
-					chksum2 = ~(StartM + dataF1 + dataF2);
-					if (chksum == chksum2){
-						M_state = 5;
-						HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
-						chkM = 0;
-						dataFN = 0;
-					}
-					break;
-				case 6:
-					if (dataFN == 2){
-						dataF1 = DataIn;
-					}
-					if(dataFN == 3){
-						dataF2 = DataIn;
-					}
-					chksum = DataIn;
-					chksum2 = ~(StartM + dataF1 + dataF2);
-					if (chksum == chksum2){
-						M_state = 6;
-						HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
-						chkM = 0;
-						dataFN = 0;
-					}
-					break;
-				case 7:
-					if (dataFN == 2){
-						Nstation = DataIn;
-					}
-					if (dataFN < Nstation + 3){
-						if (dataFN == countN + 3){
-							dataFSum += DataIn;
-							countN += 1;
-						}
-					}
-					chksum = DataIn;
-					chksum3 = ~(StartM + Nstation + dataFSum);
-					if (chksum == chksum3){
-						M_state = 7;
-						HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
-						dataFSum = 0;
-						dataFN = 0;
-						countN = 0;
-						chkM = 0;
-					}
-					break;
-				case 8: //10011000 01100111
-					chksum = DataIn;
-					chksum1 = ~(StartM);
-					if (chksum == chksum1){
-						M_state = 8;
-						HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
-						HAL_Delay(1000);
-						HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_f, 2);
-						//HAL_UART_Transmit(&huart2, (uint8_t*)temp_f, 2 ,1000);//Fn
-						chkM = 0;
-						dataFN = 0;
-					}
-					break;
-				case 9: //10011001 01100110
-					chksum = DataIn;
-					chksum1 = ~(StartM);
-					if (chksum == chksum1){
-						M_state = 9;
-						HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
-						chkM = 0;
-						dataFN = 0;
-					}
-					break;
-				case 10: //10011010 01100101
-					chksum = DataIn;
-					chksum1 = ~(StartM);
-					if (chksum == chksum1){
-						M_state = 10;
-						HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
-						chkM = 0;
-						dataFN = 0;
-					}
-					break;
-				case 11: //10011011 01100100
-					chksum = DataIn;
-					chksum1 = ~(StartM);
-					if (chksum == chksum1){
-						M_state = 11;
-						HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
-						chkM = 0;
-						dataFN = 0;
-					}
-					break;
-				case 12: //10011100 01100011
-					chksum = DataIn;
-					chksum1 = ~(StartM);
-					if (chksum == chksum1){
-						M_state = 12;
-						HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
-						//HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2 ,1000); //Xu
-						chkM = 0;
-						dataFN = 0;
-					}
-					break;
-				case 13: //10011101 01100010
-					chksum = DataIn;
-					chksum1 = ~(StartM);
-					if (chksum == chksum1){
-						M_state = 13;
-						HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
-						//HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2 ,1000); //Xu
-						chkM = 0;
-						dataFN = 0;
-					}
-					break;
-				case 14: //10011110 01100001
-					chksum = DataIn;
-					chksum1 = ~(StartM);
-					if (chksum == chksum1){
-						M_state = 14;
-						HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
-						chkM = 0;
-						dataFN = 0;
-					}
-					break;
-			}
-	}
-
-}
-void UARTRecieveIT()
-{
-//	static uint32_t dataPos =0;
-//	int16_t data=-1;
-	//HAL_UART_Receive_DMA(&huart2,RxDataBuffer,32);
-	//HAL_UART_Receive_IT(&huart2,  (uint8_t*)RxDataBuffer, 32);
-//	if(huart2.RxXferSize - huart2.RxXferCount!=dataPos)
-//	{
-//		data=RxDataBuffer[dataPos];
-//		DataIn = data;
-//		dataPos= (dataPos+1)%huart2.RxXferSize;
-//		Posdata = dataPos;
-//		dataFN += 1;
-//
-//	}
-//	HAL_UART_Receive_DMA(&huart2, (uint8_t*)RxDataBuffer, 32);
-//	if (dataPos == 32){
-//		dataPos = 0;
-//	}
-//	DataIn=RxDataBuffer[dataPos];
-//	dataPos += 1;
-//	All_mode();
-
-}
-
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
-{
-	//sprintf(TxDataBuffer, "Received:[%s]\r\n", RxDataBuffer);//s
-	//HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
-}
 /* USER CODE END 4 */
 
 /**
