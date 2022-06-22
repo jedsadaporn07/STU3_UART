@@ -47,6 +47,16 @@ DMA_HandleTypeDef hdma_usart2_tx;
 /* USER CODE BEGIN PV */
 uint8_t temp_s[2]="Xu";
 uint8_t temp_f[2]="Fn";
+////////////// transmit parameter ////////////////////
+uint8_t Req_sta[4] = {153,0,5,97}; //////////////// station 5
+uint8_t Req_AngPosi[4] = {154,61,18,97};/////////// 15634 , 1.5634 rad 90 degree
+uint8_t Req_MaxVelo[4] = {155,0,127,229};////////// 5 rpm
+////////////// Receive parameter ////////////////////
+uint8_t Set_AngVelo[2];
+uint8_t Set_AngPosi[2];
+uint8_t Set_Goal_1Sta[2];
+uint8_t Set_Goal_nSta[10];
+/////////////////////////////////////////////////////
 uint16_t datasize = 0;
 uint8_t chkStart;
 uint8_t chkStart2;
@@ -167,6 +177,8 @@ void check_Mode()
 					chksum = MainBuf[newPos-1];
 					dataF2 = MainBuf[newPos-2];
 					dataF1 = MainBuf[newPos-3];
+					Set_AngVelo[0] = dataF1;
+					Set_AngVelo[1] = dataF2;
 					chksum2 = ~(StartM + dataF1 + dataF2);
 				if (chksum == chksum2){
 					M_state = 4;
@@ -178,6 +190,8 @@ void check_Mode()
 					chksum = MainBuf[newPos-1];
 					dataF2 = MainBuf[newPos-2];
 					dataF1 = MainBuf[newPos-3];
+					Set_AngPosi[0] = dataF1;
+					Set_AngPosi[1] = dataF2;
 					chksum2 = ~(StartM + dataF1 + dataF2);
 				if (chksum == chksum2){
 					M_state = 5;
@@ -189,6 +203,8 @@ void check_Mode()
 					chksum = MainBuf[newPos-1];
 					dataF2 = MainBuf[newPos-2];
 					dataF1 = MainBuf[newPos-3];
+					Set_Goal_1Sta[0] = dataF1;
+					Set_Goal_1Sta[1] = dataF2;
 					chksum2 = ~(StartM + dataF1 + dataF2);
 				if (chksum == chksum2){
 					M_state = 6;
@@ -200,6 +216,7 @@ void check_Mode()
 				Nstation = MainBuf[(newPos-datasize)+1];
 				for(int i=2; i < Nstation+2; i++ ){
 					dataFSum += MainBuf[newPos-i];
+					Set_Goal_nSta[i-2] = MainBuf[newPos-i];
 				}
 				chksum = MainBuf[newPos-1];
 				chksum3 = ~(StartM + Nstation + dataFSum);
@@ -227,6 +244,7 @@ void check_Mode()
 					M_state = 9;
 					//HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
 					HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2 ,1000);
+					HAL_UART_Transmit(&huart2, (uint8_t*)Req_sta, 4 ,1000);
 				}
 				break;
 			case 10: //10011010 01100101
@@ -236,6 +254,7 @@ void check_Mode()
 					M_state = 10;
 					//HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
 					HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2 ,1000);
+					HAL_UART_Transmit(&huart2, (uint8_t*)Req_AngPosi, 4 ,1000);
 				}
 				break;
 			case 11: //10011011 01100100
@@ -245,6 +264,7 @@ void check_Mode()
 					M_state = 11;
 					//HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
 					HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2 ,1000);
+					HAL_UART_Transmit(&huart2, (uint8_t*)Req_MaxVelo, 4 ,1000);
 				}
 				break;
 			case 12: //10011100 01100011
