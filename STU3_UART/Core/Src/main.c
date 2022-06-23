@@ -102,25 +102,17 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
 {
 	if (huart->Instance == USART2)
 	{
-		oldPos = newPos;  // Update the last position before copying new data
+		oldPos = newPos;
 		datasize = Size;
-		/* If the data in large and it is about to exceed the buffer size, we have to route it to the start of the buffer
-		 * This is to maintain the circular buffer
-		 * The old data in the main buffer will be overlapped
-		 */
-		if (oldPos+Size > MainBuf_SIZE)  // If the current position + new data size is greater than the main buffer
+		if (oldPos+Size > MainBuf_SIZE)
 		{
-			uint16_t datatocopy = MainBuf_SIZE-oldPos;  // find out how much space is left in the main buffer
-			memcpy ((uint8_t *)MainBuf+oldPos, RxBuf, datatocopy);  // copy data in that remaining space
+			uint16_t datatocopy = MainBuf_SIZE-oldPos;
+			memcpy ((uint8_t *)MainBuf+oldPos, RxBuf, datatocopy);
 
-			oldPos = 0;  // point to the start of the buffer
-			memcpy ((uint8_t *)MainBuf, (uint8_t *)RxBuf+datatocopy, (Size-datatocopy));  // copy the remaining data
-			newPos = (Size-datatocopy);  // update the position
+			oldPos = 0;
+			memcpy ((uint8_t *)MainBuf, (uint8_t *)RxBuf+datatocopy, (Size-datatocopy));
+			newPos = (Size-datatocopy);
 		}
-
-		/* if the current position + new data size is less than the main buffer
-		 * we will simply copy the data into the buffer and update the position
-		 */
 		else
 		{
 			memcpy ((uint8_t *)MainBuf+oldPos, RxBuf, Size);
@@ -135,8 +127,6 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
 			}
 		}
 
-
-		/* start the DMA again */
 		HAL_UARTEx_ReceiveToIdle_DMA(&huart2, (uint8_t *) RxBuf, RxBuf_SIZE);
 		__HAL_DMA_DISABLE_IT(&hdma_usart2_rx, DMA_IT_HT);
 
