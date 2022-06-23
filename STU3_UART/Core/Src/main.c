@@ -49,7 +49,8 @@ uint8_t temp_s[2]="Xu";
 uint8_t temp_f[2]="Fn";
 ////////////// transmit parameter ////////////////////
 uint8_t Req_sta[4] = {153,0,5,97}; //////////////// station 5
-uint8_t Req_AngPosi[4] = {154,61,18,97};/////////// 15634 , 1.5634 rad 90 degree
+uint8_t Req_AngPosi[4] = {154,61,18,22};/////////// 15634 , 1.5634 rad 90 degree
+//uint8_t Req_AngPosi[4] = {154,122,183,52};/////////// 31415 , 3.1415 rad 180 degree
 uint8_t Req_MaxVelo[4] = {155,0,127,229};////////// 5 rpm
 ////////////// Receive parameter ////////////////////
 uint8_t Set_AngVelo[2];
