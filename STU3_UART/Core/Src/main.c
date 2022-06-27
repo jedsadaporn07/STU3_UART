@@ -59,7 +59,7 @@ uint8_t Req_AngPosi[4] = {154,61,18,22};/////////// 15634 , 1.5634 rad 90 degree
 int DataProtocol_AngPosi;
 ////////////// control///////////////////////////////////
 float KalV = 0.942478; // Velo / rad
-float CurrentEn = 4.27606; // AngPosi / rad
+float KalP = 4.27606; // AngPosi / rad
 ////////////////////////////////////////////////////////
 uint8_t Req_MaxVelo[4] = {155,0,127,229};////////// 5 rpm
 float DataProtocol_Velo;
@@ -67,11 +67,11 @@ float DataProtocol_Velo;
 ////////////// Receive parameter ////////////////////
 int Set_AngVelo[2];
 float DataProtocol_SetVelo;
-float AngVelo;
+float Velocity;
 /////////////////////////////////////////////////////
 int Set_AngPosi[2];
 int DataProtocol_SetAngPosi;
-float AngPosi;
+float Finalposition;
 /////////////////////////////////////////////////////
 int Set1_Sta;
 uint8_t Set_Goal_1Sta[2];
@@ -121,7 +121,7 @@ void HAL_TIM_PeriodElapsedCallback();
 /* USER CODE BEGIN 0 */
 
 #define RxBuf_SIZE   32
-#define MainBuf_SIZE 1024
+#define MainBuf_SIZE 32
 
 uint8_t RxBuf[RxBuf_SIZE];
 uint8_t MainBuf[MainBuf_SIZE];
@@ -138,23 +138,21 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
 		datasize = Size;
 		if (oldPos+Size > MainBuf_SIZE)
 		{
-			uint16_t datatocopy = MainBuf_SIZE-oldPos;
-			memcpy ((uint8_t *)MainBuf+oldPos, RxBuf, datatocopy);
-
 			oldPos = 0;
-			memcpy ((uint8_t *)MainBuf, (uint8_t *)RxBuf+datatocopy, (Size-datatocopy));
-			newPos = (Size-datatocopy);
+			memcpy ((uint8_t *)MainBuf+oldPos, RxBuf, Size);
+			newPos = Size+oldPos;
 		}
 		else
 		{
 			memcpy ((uint8_t *)MainBuf+oldPos, RxBuf, Size);
 			newPos = Size+oldPos;
 		}
+
 		StartM = MainBuf[newPos-datasize];
 		chkStart = StartM >> 4;
 		NameM = (StartM & 15);
-		if (chkStart == 9){
-			if (NameM >= 1 && NameM <= 14){
+		if (chkStart == 9){//1001
+			if (NameM >= 1 && NameM <= 14){//0001 - 1110
 				check_Mode();
 			}
 		}
@@ -171,7 +169,7 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
 			}
 		}
 
-		HAL_UARTEx_ReceiveToIdle_DMA(&huart2, (uint8_t *) RxBuf, RxBuf_SIZE);
+		HAL_UARTEx_ReceiveToIdle_DMA(&huart2, (uint8_t *) RxBuf, RxBuf_SIZE)  ;
 		__HAL_DMA_DISABLE_IT(&hdma_usart2_rx, DMA_IT_HT);
 
 	}
@@ -218,7 +216,7 @@ void check_Mode()
 				if (chksum == chksum2){
 					M_state = 4;
 					DataProtocol_SetVelo = Set_AngVelo[1];
-					AngVelo = (DataProtocol_SetVelo * 10)/255;
+					Velocity = (DataProtocol_SetVelo * 10)/255;
 					//HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
 					HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2 ,1000); //Xu
 				}
@@ -233,7 +231,7 @@ void check_Mode()
 				if (chksum == chksum2){
 					M_state = 5;
 					DataProtocol_SetAngPosi = (Set_AngPosi[0]*256) + Set_AngPosi[1];
-					AngPosi = (DataProtocol_SetAngPosi / (3.14 * 10000) * 180);
+					Finalposition = (DataProtocol_SetAngPosi / (3.14 * 10000) * 180);
 					//HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
 					HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2 ,1000); //Xu
 				}
@@ -274,7 +272,8 @@ void check_Mode()
 					M_state = 8;
 					//HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
 					HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2 ,1000); //Xu
-					//HAL_UART_Transmit(&huart2, (uint8_t*)temp_f, 2 ,1000);
+					///////////////// work //////////////////////////
+					HAL_UART_Transmit(&huart2, (uint8_t*)temp_f, 2 ,1000);
 				}
 				break;
 			case 9: //10011001 01100110
@@ -297,7 +296,7 @@ void check_Mode()
 					M_state = 10;
 					//HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
 					HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2 ,1000);
-					DataProtocol_AngPosi = (CurrentEn * 10000);
+					DataProtocol_AngPosi = (KalP * 10000);
 					Req_AngPosi[1] = (DataProtocol_AngPosi / 256);
 					Req_AngPosi[2] = (DataProtocol_AngPosi % 256);
 					Req_AngPosi[3] = ~(Req_AngPosi[0] + Req_AngPosi[1] + Req_AngPosi[2]);
@@ -401,7 +400,7 @@ int main(void)
 		  timestamp = micros();
 		  encdummbuf++;
 		  encdummbuf%=1023;
-		  CurrentEn = 0.006136 * encdummbuf;
+		  KalP = 0.006136 * encdummbuf;
 	  }
   }
   /* USER CODE END 3 */
@@ -568,18 +567,6 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-//void AngPos_Dummy()
-//{
-//	if(micros()-timestamp > 500000){
-//		timestamp = micros();
-//		if (Ang_Position <= 360){
-//			Ang_Position =
-//			Ang_Position = Ang_Position + 5;
-//		}
-//
-//
-//	}
-//}
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
  if(htim == &htim11)
