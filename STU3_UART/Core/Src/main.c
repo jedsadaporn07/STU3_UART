@@ -75,7 +75,8 @@ float Finalposition;
 /////////////////////////////////////////////////////
 int Set1_Sta;
 uint8_t Set_Goal_1Sta[2];
-uint8_t Set_Goal_nSta[10];
+uint8_t Set_Goal_nSta[20];
+int Goal_nsta[20];
 /////////////////////////////////////////////////////
 uint16_t datasize = 0;
 uint8_t chkStart;
@@ -157,8 +158,6 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
 			}
 		}
 		else if (StartM == 88) {
-//			newPos = oldPos + 4;
-//			oldPos = newPos;
 			StartM = MainBuf[newPos-2];
 			chkStart = StartM >> 4;
 			NameM = (StartM & 15);
@@ -184,8 +183,8 @@ void check_Mode()
 				chksum2 = ~(StartM + dataF1 + dataF2);
 				if (chksum == chksum2){
 					M_state = 1;
-					//HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
-					HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2 ,1000); //Xu
+					HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
+					//HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2 ,1000); //Xu
 				}
 				break;
 			case 2: //10010010 01101101
@@ -193,8 +192,8 @@ void check_Mode()
 				chksum1 = ~(StartM);
 				if (chksum == chksum1){
 					M_state = 2;
-					//HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
-					HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2 ,1000); //Xu
+					HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
+					//HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2 ,1000); //Xu
 				}
 				break;
 			case 3: //10010011 01101100
@@ -202,8 +201,8 @@ void check_Mode()
 					chksum1 = ~(StartM);
 				if (chksum == chksum1){
 					M_state = 3;
-					//HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
-					HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2 ,1000); //Xu
+					HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
+					//HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2 ,1000); //Xu
 				}
 				break;
 			case 4:
@@ -217,8 +216,8 @@ void check_Mode()
 					M_state = 4;
 					DataProtocol_SetVelo = Set_AngVelo[1];
 					Velocity = (DataProtocol_SetVelo * 10)/255;
-					//HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
-					HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2 ,1000); //Xu
+					HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
+					//HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2 ,1000); //Xu
 				}
 				break;
 			case 5:
@@ -232,8 +231,8 @@ void check_Mode()
 					M_state = 5;
 					DataProtocol_SetAngPosi = (Set_AngPosi[0]*256) + Set_AngPosi[1];
 					Finalposition = (DataProtocol_SetAngPosi / (3.14 * 10000) * 180);
-					//HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
-					HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2 ,1000); //Xu
+					HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
+					//HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2 ,1000); //Xu
 				}
 				break;
 			case 6:
@@ -246,23 +245,35 @@ void check_Mode()
 				if (chksum == chksum2){
 					M_state = 6;
 					Set1_Sta = Set_Goal_1Sta[1];
-					//HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
-					HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2 ,1000); //Xu
+					HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
+					//HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2 ,1000); //Xu
 				}
 				break;
 			case 7:
 				Nstation = MainBuf[(newPos-datasize)+1];
-				for(int i=2; i < Nstation+2; i++ ){
-					dataFSum += MainBuf[newPos-i];
-					Set_Goal_nSta[i-2] = MainBuf[newPos-i];
+				int y = Nstation;
+				int z = (y/2) + (y%2);
+				int k = 0;
+				for(int i=0; i < z; i++ ){
+					dataFSum += MainBuf[oldPos+(i+2)];
+					Set_Goal_nSta[i] = MainBuf[oldPos+(i+2)];
+				}
+				for(int x=1; x < Nstation+1; x++){
+					if(x % 2 == 1){
+						Goal_nsta[x-1] = (Set_Goal_nSta[k] % 16);
+					}else if(x % 2 == 0){
+						Goal_nsta[x-1] = (Set_Goal_nSta[k] / 16);
+						k += 1;
+					}
 				}
 				chksum = MainBuf[newPos-1];
 				chksum3 = ~(StartM + Nstation + dataFSum);
 				if (chksum == chksum3){
 					M_state = 7;
-					//HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
+
 					dataFSum = 0;
-					HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2 ,1000); //Xu
+					HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
+					//HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2 ,1000); //Xu
 				}
 				break;
 			case 8: //10011000 01100111
@@ -270,10 +281,11 @@ void check_Mode()
 				chksum1 = ~(StartM);
 				if (chksum == chksum1){
 					M_state = 8;
-					//HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
-					HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2 ,1000); //Xu
+					HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
+					//HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2 ,1000); //Xu
 					///////////////// work //////////////////////////
-					HAL_UART_Transmit(&huart2, (uint8_t*)temp_f, 2 ,1000);
+					HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_f, 2);
+					//HAL_UART_Transmit(&huart2, (uint8_t*)temp_f, 2 ,1000);
 				}
 				break;
 			case 9: //10011001 01100110
@@ -281,7 +293,8 @@ void check_Mode()
 				chksum1 = ~(StartM);
 				if (chksum == chksum1){
 					M_state = 9;
-					//HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
+//					HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
+//					HAL_UART_Transmit_DMA(&huart2, (uint8_t*)Req_sta, 4);
 					HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2 ,1000);
 					//Req_sta[1] = 0;
 					//Req_sta[2] = x;
@@ -294,12 +307,13 @@ void check_Mode()
 				chksum1 = ~(StartM);
 				if (chksum == chksum1){
 					M_state = 10;
-					//HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
+//					HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
 					HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2 ,1000);
-					DataProtocol_AngPosi = (KalP * 10000);
-					Req_AngPosi[1] = (DataProtocol_AngPosi / 256);
-					Req_AngPosi[2] = (DataProtocol_AngPosi % 256);
-					Req_AngPosi[3] = ~(Req_AngPosi[0] + Req_AngPosi[1] + Req_AngPosi[2]);
+//					DataProtocol_AngPosi = (KalP * 10000);
+//					Req_AngPosi[1] = (DataProtocol_AngPosi / 256);
+//					Req_AngPosi[2] = (DataProtocol_AngPosi % 256);
+//					Req_AngPosi[3] = ~(Req_AngPosi[0] + Req_AngPosi[1] + Req_AngPosi[2]);
+//					HAL_UART_Transmit_DMA(&huart2, (uint8_t*)Req_AngPosi, 4);
 					HAL_UART_Transmit(&huart2, (uint8_t*)Req_AngPosi, 4 ,1000);
 				}
 				break;
@@ -308,12 +322,13 @@ void check_Mode()
 				chksum1 = ~(StartM);
 				if (chksum == chksum1){
 					M_state = 11;
-					//HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
+//					HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
 					HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2 ,1000);
-					DataProtocol_Velo = (KalV/(2 * 3.14)) * 60;
-					Req_MaxVelo[1] = 0;
-					Req_MaxVelo[2] = (DataProtocol_Velo * 255) / 10;
-					Req_MaxVelo[3] = ~(Req_MaxVelo[0] + Req_MaxVelo[1] + Req_MaxVelo[2]);
+//					DataProtocol_Velo = (KalV/(2 * 3.14)) * 60;
+//					Req_MaxVelo[1] = 0;
+//					Req_MaxVelo[2] = (DataProtocol_Velo * 255) / 10;
+//					Req_MaxVelo[3] = ~(Req_MaxVelo[0] + Req_MaxVelo[1] + Req_MaxVelo[2]);
+//					HAL_UART_Transmit_DMA(&huart2, (uint8_t*)Req_MaxVelo, 4);
 					HAL_UART_Transmit(&huart2, (uint8_t*)Req_MaxVelo, 4 ,1000);
 				}
 				break;
@@ -322,7 +337,7 @@ void check_Mode()
 				chksum1 = ~(StartM);
 				if (chksum == chksum1){
 					M_state = 12;
-					//HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
+//					HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
 					HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2 ,1000); //Xu
 				}
 				break;
@@ -331,7 +346,7 @@ void check_Mode()
 				chksum1 = ~(StartM);
 				if (chksum == chksum1){
 					M_state = 13;
-					//HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
+//					HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
 					HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2 ,1000); //Xu
 				}
 				break;
@@ -340,7 +355,7 @@ void check_Mode()
 				chksum1 = ~(StartM);
 				if (chksum == chksum1){
 					M_state = 14;
-					//HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
+//					HAL_UART_Transmit_DMA(&huart2, (uint8_t*)temp_s, 2);
 					HAL_UART_Transmit(&huart2, (uint8_t*)temp_s, 2 ,1000); //Xu
 				}
 				break;
